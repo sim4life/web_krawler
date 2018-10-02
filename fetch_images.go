@@ -15,6 +15,11 @@ import (
 	"github.com/PuerkitoBio/goquery"
 )
 
+const (
+	SuperMax = 100
+	adWord   = "banner"
+)
+
 type Gallery struct {
 	title    string
 	numImgs  int
@@ -53,23 +58,18 @@ func replaceNum(str string, num int) string {
  * It returns "" empty string if it can't find href attribute from the
  * goquery.Selection parameter.
  */
-func getUri(sel *goquery.Selection, base string) string {
-	if sel != nil {
-		str, exists := sel.Attr("href")
-		if exists {
-			uri, err := url.Parse(str)
-			if err != nil {
-				return ""
-			}
-			baseUrl, err := url.Parse(base)
-			if err != nil {
-				return ""
-			}
-			uri = baseUrl.ResolveReference(uri)
-			return uri.String()
-		}
+func getUri(str, base string) string {
+	uri, err := url.Parse(str)
+	if err != nil {
+		return ""
 	}
-	return ""
+	baseUrl, err := url.Parse(base)
+	if err != nil {
+		return ""
+	}
+	uri = baseUrl.ResolveReference(uri)
+	return uri.String()
+
 }
 
 /**
@@ -128,19 +128,58 @@ func FetchFinalPage(urlQueue chan string, imgGallQueue chan *Gallery, client htt
 		fmt.Println("about to find stuff")
 		// Find required info within the document
 		title := strings.TrimSpace(doc.Find("h1").First().Text())
+		someHref := doc.Find("h1").First().NextAll().Find("a").Has("img")
+		// someHrefS := doc.Find("h1").First().Parent().Siblings().Find("a").Has("img")
+		if someHref.Nodes == nil {
+			fmt.Println("someRef is nil - Once")
+			someHref = doc.Find("h1").First().Parent().NextAll().Find("a").Has("img")
+		}
+		var someHrefSrc string
+		if someHref.Nodes != nil {
+			someHrefSrc, _ = someHref.Find("img").Attr("src")
+			fmt.Printf("[1] someHref is not nil with attr:%s\n", someHrefSrc)
+		}
+		if someHref.Nodes == nil || strings.Contains(someHrefSrc, adWord) {
+			someHref = doc.Find("h1").First().Parent().Find("a").Has("img")
+		}
+		if someHref.Nodes != nil {
+			outerHtml, _ := goquery.OuterHtml(someHref)
+			html, _ := someHref.Html()
+			fmt.Printf("someRef.Nodes: %#v\n", someHref.Nodes)
+			fmt.Printf("OuterHtml is:%s-\n", outerHtml)
+			fmt.Printf("html is:%s-\n", html)
+			someHrefSrc, _ = someHref.Find("img").Attr("src")
+			fmt.Printf("[2] someHref is not nil with attr:%s\n", someHrefSrc)
+		}
+		if someHref.Nodes == nil || strings.Contains(someHrefSrc, adWord) {
+			title = strings.TrimSpace(doc.Find("h2").First().Text())
+			someHref = doc.Find("h2").First().Parent().NextAll().Find("a").Has("img")
+		}
+		// outerHtml, _ := goquery.OuterHtml(someHref)
+		// html, _ := someHref.Html()
+		// outerHtmlS, _ := goquery.OuterHtml(someHrefS)
+		// htmlS, _ := someHrefS.Html()
+
+		// fmt.Printf("someRef: %#v\n", someHref)
+		// fmt.Printf("someRef.Nodes: %#v\n", someHref.Nodes)
+		// fmt.Printf("OuterHtml is:%s-\n", outerHtml)
+		// fmt.Printf("html is:%s-\n", html)
+		// fmt.Printf("OuterHtml.siblings is:%s-\n", outerHtmlS)
+		// fmt.Printf("html.siblings is:%s-\n", htmlS)
 
 		var titleInner, imgZeroUrl, href, newHref string
 		var maxNum, newNum, num, hrefN, newHrefN int
 		// var realA *goquery.Selection
-		/*realA = */ doc.Find("h1").First().NextAll().Find("a").Has("img").Each(func(i int, s *goquery.Selection) {
+		/*realA = */ someHref.Each(func(i int, s *goquery.Selection) {
 			var isT bool
+			uriStr, _ := s.Attr("href")
 			titleInner, isT = s.Attr("title")
 			if isT && title != "" && strings.Contains(titleInner, title) {
 				if imgZeroUrl == "" {
-					imgZeroUrl = getUri(s, baseUri)
+					imgZeroUrl = getUri(uriStr, baseUri)
 				}
 				href = newHref
-				newHref = getUri(s, baseUri)
+				newHref = getUri(uriStr, baseUri)
 				// fmt.Printf("[1] imgZeroUrl is:[%d]%s\n", i, imgZeroUrl)
 				// fmt.Printf("[1] href:%s-\nnewHref:%s-\n", href, newHref)
 
@@ -155,7 +194,7 @@ func FetchFinalPage(urlQueue chan string, imgGallQueue chan *Gallery, client htt
 				// fmt.Printf("[1] A3 maxNum -- num: %d ---%d\n", maxNum, num)
 			} else {
 				href = newHref
-				newHref = getUri(s, baseUri)
+				newHref = getUri(uriStr, baseUri)
 				// fmt.Printf("[2] imgZeroUrl is:[%d]%s\n", i, imgZeroUrl)
 				// fmt.Printf("[2] href:%s-\nnewHref:%s-\n", href, newHref)
 
@@ -185,7 +224,7 @@ func FetchFinalPage(urlQueue chan string, imgGallQueue chan *Gallery, client htt
 		fmt.Printf("\n---images URL is:\n%s\n---\n", imgZeroUrl)
 		// fmt.Printf("OuterHtml is:%s-\n", outerHtml)
 		// fmt.Printf("html is:%s-\n", html)
-		if VerifyURL(imgZeroUrl) {
+		if VerifyURL(imgZeroUrl) && maxNum < SuperMax {
 			gall := &Gallery{title, maxNum, imgZeroUrl}
 			imgGallQueue <- gall
 		}
@@ -218,16 +257,17 @@ func FetchImages(imgGallQueue chan *Gallery, imgUrlQueue chan *ImgUrl, client ht
 			// souterHtml, _ := goquery.OuterHtml(s)
 			// shtml, _ := s.Html()
 			// fmt.Printf("Html is:%s\n", shtml)
-			imgSrc, isS = s.Attr("src")
+			imgSrcStr, isS := s.Attr("src")
 			// imgAlt, _ := s.Attr("alt")
 			fmt.Printf("[%d]:", i)
 			// fmt.Printf("imgSrc is:%s\n", imgSrc)
 			// fmt.Printf("imgAlt is:%s\n", imgAlt)
 			if isS {
-				imgNum := extractLastInt(imgSrc)
-				fmt.Printf("startNum:%d vs imgNum:%d\n", startNum, imgNum)
+				imgNum := extractLastInt(imgSrcStr)
+				// fmt.Printf("startNum:%d vs imgNum:%d\n", startNum, imgNum)
 				if imgNum == startNum {
-					if !strings.Contains(imgSrc, "banner") {
+					if !strings.Contains(imgSrcStr, adWord) {
+						imgSrc = getUri(imgSrcStr, baseUri)
 						fmt.Printf("imgSrc is:%s-\n", imgSrc)
 						return false
 					}
@@ -269,7 +309,7 @@ func createDir(title string) string {
 	titleSlc := strings.Split(title, " ")
 	var dirName string
 	var found bool
-	commons := []string{"the", "of", "and", "in", "her", "with", "for"}
+	commons := []string{"a", "on", "the", "of", "out", "and", "in", "her", "with", "for"}
 	selTitles := make([]string, 0)
 	for _, word := range titleSlc {
 		if word != "" {

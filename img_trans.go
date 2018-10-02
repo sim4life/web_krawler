@@ -20,26 +20,40 @@ type ImgUrl struct {
 }
 
 func rotateImg(img image.Image) image.Image {
-	fmt.Println("Waiting for jpeg image...")
-	return transform.Rotate(img, 270.0, nil)
+	b := img.Bounds()
+	imgWidth := b.Max.X
+	imgHeight := b.Max.Y
+	fmt.Printf("Waiting for jpeg image...Width:%d Height:%d\n", imgWidth, imgHeight)
+	if (float64(imgHeight) / float64(imgWidth)) > 1.2 {
+		fmt.Println("Abt to rotate")
+		//it's a portrait
+		return transform.Rotate(img, 270.0, &transform.RotationOptions{ResizeBounds: true})
+	}
+	// else it's a landscape
+	return img
 }
 
 func SaveImg(imgUrlQueue chan *ImgUrl, client http.Client) {
 	for imgUrl := range imgUrlQueue {
+		fmt.Println("Downloading...", imgUrl.url)
 		resp, err := client.Get(imgUrl.url)
-		check(err)
-		// defer resp.Body.Close()
-
-		// saveImgToFile(imgUrl, resp)
-		img, err := readImage(resp.Body)
+		// check(err)
 		if err != nil {
-			log.Println(err.Error())
+			log.Println("Download error:", err)
+		} else {
+			// defer resp.Body.Close()
+
+			// saveImgToFile(imgUrl, resp)
+			img, err := readImage(resp.Body)
+			resp.Body.Close()
+			if err != nil {
+				log.Println(err)
+				log.Println("Skipping...")
+			} else {
+				img = rotateImg(img)
+				saveTransformedImg(imgUrl, img)
+			}
 		}
-		resp.Body.Close()
-
-		img = rotateImg(img)
-		saveTransformedImg(imgUrl, img)
-
 	}
 
 }
@@ -80,4 +94,18 @@ func saveImgToFile(imgUrl *ImgUrl, resp *http.Response) {
 	if err != nil {
 		log.Println(err.Error())
 	}
+}
+
+func getImageDimension(imagePath string) (int, int) {
+	file, err := os.Open(imagePath)
+	if err != nil {
+		log.Println(err)
+	}
+	defer file.Close()
+
+	imgConfig, _, err := image.DecodeConfig(file)
+	if err != nil {
+		log.Println(imagePath, err)
+	}
+	return imgConfig.Width, imgConfig.Height
 }
